@@ -28,32 +28,55 @@
     .statRow{display:flex;gap:8px;align-items:center}
     .stat{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:8px}
     footer{color:#9fb0bf;font-size:12px;text-align:center;margin-top:12px}
-    .paused-overlay {
+    @keyframes pop{0%{transform:scale(.6);opacity:0}100%{transform:scale(1);opacity:1}}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    
+    /* Nuevos estilos para el botón de minimizar */
+    .minimize-btn {
       position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.7);
+      top: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.1);
+      border: none;
+      color: #e6eef6;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: white;
-      font-size: 24px;
+      cursor: pointer;
       font-weight: bold;
-      border-radius: 12px;
-      display: none;
+      z-index: 10;
     }
-    @keyframes pop{0%{transform:scale(.6);opacity:0}100%{transform:scale(1);opacity:1}}
-    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    
+    .minimized-overlay {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      background: rgba(15, 23, 36, 0.8);
+      backdrop-filter: blur(6px);
+      padding: 10px;
+      border-radius: 8px;
+      z-index: 5;
+      pointer-events: auto;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    
+    .minimized-overlay button {
+      background: var(--accent);
+      border: 0;
+      color: #041018;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-weight: 700;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
   <div id="gameWrap">
-    <div style="position:relative">
-      <canvas id="canvas" width="720" height="720"></canvas>
-      <div class="paused-overlay" id="pausedOverlay">PAUSADO</div>
-    </div>
+    <canvas id="canvas" width="720" height="720"></canvas>
 
     <div class="hud">
       <div class="label">Vida</div>
@@ -113,10 +136,6 @@ const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 let W = canvas.width, H = canvas.height;
 
-// Estado del juego (pausa)
-let gamePaused = false;
-const pausedOverlay = document.getElementById('pausedOverlay');
-
 // Audio (WebAudio simple beeps) — initialized lazily on first user gesture
 let audioCtx = null;
 function ensureAudio(){ if(!audioCtx){ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } }
@@ -140,6 +159,7 @@ const CHARGE_TIME = 15000; // 15s
 let chargeStart = performance.now();
 let inRestTurn = false;
 let immune = false; // Inmunidad durante turno de descanso
+let overlayMinimized = false; // Estado de la ventana de turno
 
 // Ladrillos
 let bricks = [];
@@ -172,16 +192,11 @@ brickAmountInput.addEventListener('input', ()=>{ brickCountLabel.textContent = b
 brickDamageInput.addEventListener('input', ()=>{ brickDmgLabel.textContent = brickDamageInput.value; });
 brickSizeInput.addEventListener('input', ()=>{ brickSizePctLabel.textContent = brickSizeInput.value + '%'; });
 
-// Toggle controls - con pausa del juego
+// Toggle controls
 const btnToggle = document.getElementById('btnToggle');
 const controlsBox = document.getElementById('controlsBox');
 btnToggle.addEventListener('click', ()=>{
-  const willShow = controlsBox.style.display === 'none' || controlsBox.style.display === '';
-  controlsBox.style.display = willShow ? 'block' : 'none';
-  
-  // Pausar/reanudar el juego
-  gamePaused = willShow;
-  pausedOverlay.style.display = willShow ? 'flex' : 'none';
+  controlsBox.style.display = controlsBox.style.display==='none' || controlsBox.style.display==='' ? 'block':'none';
 });
 
 // UI elements
@@ -217,13 +232,9 @@ window.addEventListener('touchstart', initAudioOnGesture, {passive:true});
 window.addEventListener('mousedown', initAudioOnGesture, {passive:true});
 
 canvas.addEventListener('touchstart', (e)=>{
-  if (gamePaused) return; // No responder a toques cuando está pausado
   e.preventDefault(); const t = e.touches[0]; const rect = canvas.getBoundingClientRect(); const x = (t.clientX - rect.left); const y = (t.clientY - rect.top); isTouching = true; setCubeTo(x,y);
 });
-canvas.addEventListener('touchmove', (e)=>{ 
-  if (gamePaused) return; // No responder a toques cuando está pausado
-  e.preventDefault(); if(!isTouching) return; const t = e.touches[0]; const rect = canvas.getBoundingClientRect(); setCubeTo(t.clientX-rect.left, t.clientY-rect.top); 
-});
+canvas.addEventListener('touchmove', (e)=>{ e.preventDefault(); if(!isTouching) return; const t = e.touches[0]; const rect = canvas.getBoundingClientRect(); setCubeTo(t.clientX-rect.left, t.clientY-rect.top); });
 canvas.addEventListener('touchend', (e)=>{ e.preventDefault(); isTouching=false; });
 
 function setCubeTo(x,y){ const pad = cube.size/2 + 6; cube.x = Math.max(pad, Math.min(W - pad, x)); cube.y = Math.max(pad, Math.min(H - pad, y)); }
@@ -273,20 +284,7 @@ function spawnParticles(x,y,color){ for(let i=0;i<12;i++){ const ang = Math.rand
 
 // Game loop
 let lastTime = performance.now();
-function loop(now){ 
-  if (gamePaused) {
-    // Si el juego está pausado, solo solicitar el siguiente frame
-    requestAnimationFrame(loop);
-    return;
-  }
-  
-  const dt = (now - lastTime)/1000; 
-  lastTime = now; 
-  update(dt, now); 
-  render(); 
-  if(hp>0) requestAnimationFrame(loop); 
-  else gameOver(); 
-}
+function loop(now){ const dt = (now - lastTime)/1000; lastTime = now; update(dt, now); render(); if(hp>0) requestAnimationFrame(loop); else gameOver(); }
 
 function update(dt, now){
   if(!inRestTurn){
@@ -296,7 +294,8 @@ function update(dt, now){
     if(pct >= 1) enterRestTurn();
   }
 
-  if(!inRestTurn){ 
+  // Si el overlay está minimizado, no spawnean ladrillos
+  if(!inRestTurn && !overlayMinimized){ 
     const spawnPct = parseInt(spawnSpeedInput.value)/100; 
     const interval = baseSpawnInterval / spawnPct; 
     if(now - lastSpawn > interval){ 
@@ -386,6 +385,7 @@ function enterRestTurn(){
 
 function endRestTurn(){ 
   inRestTurn = false; 
+  overlayMinimized = false;
   immune = false; // Desactivar inmunidad al terminar el turno
   chargeStart = performance.now(); 
   chargeFill.style.width = '0%'; 
@@ -393,10 +393,30 @@ function endRestTurn(){
   turnOverlay.innerHTML = ''; 
 }
 
+function minimizeOverlay() {
+  overlayMinimized = true;
+  turnOverlay.innerHTML = '';
+  
+  // Crear overlay minimizado
+  const minimizedCard = document.createElement('div');
+  minimizedCard.className = 'minimized-overlay';
+  minimizedCard.innerHTML = `
+    <div style="margin-bottom:8px; font-size:14px;">Turno descanso (minimizado)</div>
+    <button id="restoreOverlay">Restaurar</button>
+  `;
+  turnOverlay.appendChild(minimizedCard);
+  
+  document.getElementById('restoreOverlay').addEventListener('click', () => {
+    overlayMinimized = false;
+    showRestOverlay();
+  });
+}
+
 function showRestOverlay(){
   turnOverlay.innerHTML = '';
   const card = document.createElement('div'); card.className = 'overlayCard';
   card.innerHTML = `
+    <button class="minimize-btn" id="minimizeBtn">—</button>
     <h3>Turno descanso</h3>
     <div class="small">Elige una acción antes de reanudar.</div>
     <div style="margin-top:10px">
@@ -408,6 +428,9 @@ function showRestOverlay(){
     <div style="margin-top:8px" class="small">Vida actual: <strong id=curHp>${hp}</strong> / ${maxHP}</div>`;
   turnOverlay.appendChild(card);
 
+  // Botón de minimizar
+  document.getElementById('minimizeBtn').addEventListener('click', minimizeOverlay);
+  
   document.getElementById('btnHeal').addEventListener('click', ()=>{ 
     const healAmount = baseHeal + healBonus; 
     hp = Math.min(maxHP, hp + healAmount); 
@@ -451,9 +474,8 @@ function resetGame(){
   particles = []; 
   healBonus = 0; 
   inRestTurn = false; 
+  overlayMinimized = false;
   immune = false;
-  gamePaused = false;
-  pausedOverlay.style.display = 'none';
   chargeStart = performance.now(); 
   lastSpawn = performance.now(); 
   turnOverlay.innerHTML = ''; 
@@ -477,14 +499,8 @@ function resetGame(){
 
 // Accessibility: mouse support for testing on desktop
 let mouseDown=false;
-canvas.addEventListener('mousedown',(e)=>{ 
-  if (gamePaused) return; // No responder a clics cuando está pausado
-  mouseDown=true; ensureAudio(); const r=canvas.getBoundingClientRect(); setCubeTo(e.clientX-r.left, e.clientY-r.top); 
-});
-window.addEventListener('mousemove',(e)=>{ 
-  if(!mouseDown || gamePaused) return; // No responder a movimientos cuando está pausado
-  const r=canvas.getBoundingClientRect(); setCubeTo(e.clientX-r.left, e.clientY-r.top); 
-});
+canvas.addEventListener('mousedown',(e)=>{ mouseDown=true; ensureAudio(); const r=canvas.getBoundingClientRect(); setCubeTo(e.clientX-r.left, e.clientY-r.top); });
+window.addEventListener('mousemove',(e)=>{ if(!mouseDown) return; const r=canvas.getBoundingClientRect(); setCubeTo(e.clientX-r.left, e.clientY-r.top); });
 window.addEventListener('mouseup',()=>{ mouseDown=false; });
 
 // Start game loop
