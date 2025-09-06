@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Juego Ladrillos - HTML5 (móvil)</title>
+  <style>
+    :root{--bg:#0b1220;--card:#0f1724;--accent:#49c1a2;--danger:#ff6b6b;--highlight:#ffe177}
+    html,body{height:100%;margin:0;font-family:system-ui,Arial;background:linear-gradient(180deg,#07101a 0%, #0b1220 100%);color:#e6eef6}
+    #gameWrap{max-width:900px;margin:0 auto;padding:10px;box-sizing:border-box}
+    #canvas{display:block;width:100%;background:#0b1220;border-radius:12px;touch-action:none;box-shadow:0 8px 40px rgba(0,0,0,.6) inset}
+    .hud{display:flex;gap:10px;align-items:center;margin-top:8px}
+    .bar{background:rgba(255,255,255,0.06);height:18px;border-radius:9px;overflow:hidden;flex:1}
+    .bar > .fill{height:100%;background:linear-gradient(90deg,var(--accent),#3fcbb5);width:50%;transition:width .2s ease}
+    .label{min-width:84px;text-align:left;font-size:14px}
+    .controlsWrap{position:fixed;right:12px;bottom:12px;max-width:320px;text-align:right}
+    .controlsToggle{background:var(--accent);border:0;color:#041018;padding:8px 12px;border-radius:8px;font-weight:700;cursor:pointer}
+    .controls{margin-top:6px;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);padding:10px;border-radius:10px;max-width:320px;display:none;text-align:left;animation:fadeIn .3s ease forwards}
+    .controls label{display:block;font-size:12px;margin-bottom:6px}
+    .controls input[type=range]{width:220px}
+    #info{font-size:13px;margin-top:6px}
+    #turnOverlay{position:fixed;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+    .overlayCard{pointer-events:auto;background:linear-gradient(180deg,#0f1724, #0d1620);padding:16px;border-radius:12px;box-shadow:0 6px 30px rgba(0,0,0,.6);width:90%;max-width:360px;text-align:center;animation:pop .4s ease}
+    .overlayCard h3{margin:0 0 6px}
+    .overlayCard button{margin:8px;padding:10px 12px;border-radius:10px;border:0;background:var(--accent);color:#041018;font-weight:700;cursor:pointer;transition:transform .2s}
+    .overlayCard button:hover{transform:scale(1.05)}
+    .small{font-size:13px;color:#cddce6}
+    .statRow{display:flex;gap:8px;align-items:center}
+    .stat{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:8px}
+    footer{color:#9fb0bf;font-size:12px;text-align:center;margin-top:12px}
+    @keyframes pop{0%{transform:scale(.6);opacity:0}100%{transform:scale(1);opacity:1}}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  </style>
+</head>
+<body>
+  <div id="gameWrap">
+    <canvas id="canvas" width="720" height="720"></canvas>
+
+    <div class="hud">
+      <div class="label">Vida</div>
+      <div class="bar" id="hpBar"><div class="fill" id="hpFill"></div></div>
+      <div class="statRow"><div class="stat" id="hpText">80 / 80</div></div>
+    </div>
+
+    <div class="hud" style="margin-top:6px">
+      <div class="label">Energía</div>
+      <div class="bar" id="enBar"><div class="fill" id="enFill" style="width:10%"></div></div>
+      <div class="statRow"><div class="stat" id="enText">0</div></div>
+    </div>
+
+    <div class="hud" style="margin-top:6px">
+      <div class="label">Carga (turno)</div>
+      <div class="bar" id="chargeBar"><div class="fill" id="chargeFill"></div></div>
+      <div class="statRow"><div class="stat" id="chargeText">0%</div></div>
+    </div>
+
+    <div id="info">Toca y arrastra el cubo blanco para moverte. Evita los ladrillos. Lectura: daño=5 por ladrillo.</div>
+
+    <div class="controlsWrap">
+      <button class="controlsToggle" id="btnToggle">Dificultad</button>
+      <div class="controls" id="controlsBox">
+        <label>Velocidad de spawn: <span id="spawnPct">100%</span></label>
+        <input id="spawnSpeed" type="range" min="100" max="800" value="100">
+
+        <label>Velocidad de desplazamiento ladrillos: <span id="movePct">100%</span></label>
+        <input id="moveSpeed" type="range" min="100" max="800" value="100">
+        
+        <label>Cantidad de ladrillos: <span id="brickCount">1</span></label>
+        <input id="brickAmount" type="range" min="1" max="10" value="1">
+        
+        <label>Daño de ladrillos: <span id="brickDmg">5</span></label>
+        <input id="brickDamage" type="range" min="5" max="20" value="5">
+        
+        <label>Tamaño de ladrillos: <span id="brickSizePct">100%</span></label>
+        <input id="brickSize" type="range" min="50" max="600" value="100">
+        
+        <label>Comportamiento ladrillos:</label>
+        <select id="brickBehavior">
+          <option value="target">Dirigirse al jugador</option>
+          <option value="straight">Recto (dirección fija)</option>
+        </select>
+
+        <div style="margin-top:8px" class="small">Durante el "turno descanso" aparecen 3 opciones: curar, +30 energía, sacrificar -5 HP (aumenta siguiente curación a +20).</div>
+      </div>
+    </div>
+
+    <div id="turnOverlay"></div>
+
+    <footer>Archivo ejecutable: abre este HTML en tu navegador móvil. Optimizado para touch.</footer>
+  </div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let W = canvas.width, H = canvas.height;
+
+// Audio (WebAudio simple beeps) — initialized lazily on first user gesture
+let audioCtx = null;
+function ensureAudio(){ if(!audioCtx){ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } }
+function playSound(type){ try{ ensureAudio(); const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain(); osc.connect(gain); gain.connect(audioCtx.destination);
+  if(type==='hit'){ osc.frequency.value = 220; gain.gain.value = 0.18; }
+  else if(type==='heal'){ osc.frequency.value = 620; gain.gain.value = 0.12; }
+  else if(type==='energy'){ osc.frequency.value = 980; gain.gain.value = 0.12; }
+  else { osc.frequency.value = 440; gain.gain.value = 0.08; }
+  osc.start(); gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.28);
+  osc.stop(audioCtx.currentTime + 0.3);
+}catch(e){ /* ignore audio errors */ }}
+
+// Estado jugador
+let maxHP = 80, hp = 80;
+let energy = 0;
+let baseHeal = 15;
+let healBonus = 0; // Bonus acumulado por sacrificios
+
+// Turno & carga
+const CHARGE_TIME = 15000; // 15s
+let chargeStart = performance.now();
+let inRestTurn = false;
+let immune = false; // Inmunidad durante turno de descanso
+
+// Ladrillos
+let bricks = [];
+let brickDamageValue = 5;
+const baseSpawnInterval = 1100; // ms
+let lastSpawn = 0;
+const baseBrickSpeed = 120; // px/sec
+
+// Partículas y efectos
+let particles = [];
+let hitFlash = 0;
+
+// Sliders UI
+const spawnSpeedInput = document.getElementById('spawnSpeed');
+const spawnPctLabel = document.getElementById('spawnPct');
+const moveSpeedInput = document.getElementById('moveSpeed');
+const movePctLabel = document.getElementById('movePct');
+const brickAmountInput = document.getElementById('brickAmount');
+const brickCountLabel = document.getElementById('brickCount');
+const brickDamageInput = document.getElementById('brickDamage');
+const brickDmgLabel = document.getElementById('brickDmg');
+const brickSizeInput = document.getElementById('brickSize');
+const brickSizePctLabel = document.getElementById('brickSizePct');
+const brickBehaviorSelect = document.getElementById('brickBehavior');
+
+// Event listeners para los nuevos controles
+spawnSpeedInput.addEventListener('input', ()=>{ spawnPctLabel.textContent = spawnSpeedInput.value + '%'; });
+moveSpeedInput.addEventListener('input', ()=>{ movePctLabel.textContent = moveSpeedInput.value + '%'; });
+brickAmountInput.addEventListener('input', ()=>{ brickCountLabel.textContent = brickAmountInput.value; });
+brickDamageInput.addEventListener('input', ()=>{ brickDmgLabel.textContent = brickDamageInput.value; });
+brickSizeInput.addEventListener('input', ()=>{ brickSizePctLabel.textContent = brickSizeInput.value + '%'; });
+
+// Toggle controls
+const btnToggle = document.getElementById('btnToggle');
+const controlsBox = document.getElementById('controlsBox');
+btnToggle.addEventListener('click', ()=>{
+  controlsBox.style.display = controlsBox.style.display==='none' || controlsBox.style.display==='' ? 'block':'none';
+});
+
+// UI elements
+const hpFill = document.getElementById('hpFill');
+const hpText = document.getElementById('hpText');
+const enFill = document.getElementById('enFill');
+const enText = document.getElementById('enText');
+const chargeFill = document.getElementById('chargeFill');
+const chargeText = document.getElementById('chargeText');
+const turnOverlay = document.getElementById('turnOverlay');
+
+function resize(){
+  const ratio = Math.max(1, window.devicePixelRatio || 1);
+  const cssW = Math.min(window.innerWidth-20, 720);
+  canvas.style.width = cssW + 'px';
+  canvas.style.height = cssW + 'px';
+  canvas.width = Math.floor(cssW * ratio);
+  canvas.height = Math.floor(cssW * ratio);
+  ctx.setTransform(ratio,0,0,ratio,0,0);
+  W = canvas.width / ratio; H = canvas.height / ratio;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Cubo jugador
+const cube = { x: W/2, y: H/2, size: 40 };
+
+// Touch control (and create audio context on first gesture)
+let isTouching = false;
+function initAudioOnGesture(e){ try{ ensureAudio(); window.removeEventListener('touchstart', initAudioOnGesture); window.removeEventListener('mousedown', initAudioOnGesture); }catch(e){}
+}
+window.addEventListener('touchstart', initAudioOnGesture, {passive:true});
+window.addEventListener('mousedown', initAudioOnGesture, {passive:true});
+
+canvas.addEventListener('touchstart', (e)=>{
+  e.preventDefault(); const t = e.touches[0]; const rect = canvas.getBoundingClientRect(); const x = (t.clientX - rect.left); const y = (t.clientY - rect.top); isTouching = true; setCubeTo(x,y);
+});
+canvas.addEventListener('touchmove', (e)=>{ e.preventDefault(); if(!isTouching) return; const t = e.touches[0]; const rect = canvas.getBoundingClientRect(); setCubeTo(t.clientX-rect.left, t.clientY-rect.top); });
+canvas.addEventListener('touchend', (e)=>{ e.preventDefault(); isTouching=false; });
+
+function setCubeTo(x,y){ const pad = cube.size/2 + 6; cube.x = Math.max(pad, Math.min(W - pad, x)); cube.y = Math.max(pad, Math.min(H - pad, y)); }
+
+// Spawning bricks
+function spawnBrick(){
+  const amount = parseInt(brickAmountInput.value);
+  for (let i = 0; i < amount; i++) {
+    const side = Math.floor(Math.random()*4);
+    let bx, by, vx, vy;
+    if(side===0){ bx = Math.random()*W; by = -30; }
+    if(side===1){ bx = W+30; by = Math.random()*H; }
+    if(side===2){ bx = Math.random()*W; by = H+30; }
+    if(side===3){ bx = -30; by = Math.random()*H; }
+    
+    const movePct = parseInt(moveSpeedInput.value)/100;
+    const speed = baseBrickSpeed * movePct;
+    
+    if(brickBehaviorSelect.value === 'target') {
+      // Dirigirse al jugador
+      const angle = Math.atan2(cube.y - by, cube.x - bx);
+      vx = Math.cos(angle) * speed; 
+      vy = Math.sin(angle) * speed;
+    } else {
+      // Movimiento recto (dirección fija)
+      if(side===0){ vx = 0; vy = speed; }
+      if(side===1){ vx = -speed; vy = 0; }
+      if(side===2){ vx = 0; vy = -speed; }
+      if(side===3){ vx = speed; vy = 0; }
+    }
+    
+    const sizePct = parseInt(brickSizeInput.value)/100;
+    const size = 28 * sizePct;
+    
+    bricks.push({
+      x:bx, y:by, 
+      vx:vx, vy:vy, 
+      size: size,
+      side:side,
+      angle:Math.random()*Math.PI*2
+    });
+  }
+}
+
+// Partícula helper
+function spawnParticles(x,y,color){ for(let i=0;i<12;i++){ const ang = Math.random()*Math.PI*2; const spd = 80+Math.random()*80; particles.push({x,y,vx:Math.cos(ang)*spd,vy:Math.sin(ang)*spd,life:0.6,color}); }}
+
+// Game loop
+let lastTime = performance.now();
+function loop(now){ const dt = (now - lastTime)/1000; lastTime = now; update(dt, now); render(); if(hp>0) requestAnimationFrame(loop); else gameOver(); }
+
+function update(dt, now){
+  if(!inRestTurn){
+    const elapsed = now - chargeStart;
+    const pct = Math.min(1, elapsed / CHARGE_TIME);
+    chargeFill.style.width = (pct*100) + '%'; chargeText.textContent = Math.floor(pct*100) + '%';
+    if(pct >= 1) enterRestTurn();
+  }
+
+  if(!inRestTurn){ 
+    const spawnPct = parseInt(spawnSpeedInput.value)/100; 
+    const interval = baseSpawnInterval / spawnPct; 
+    if(now - lastSpawn > interval){ 
+      spawnBrick(); 
+      lastSpawn = now; 
+    }
+  }
+
+  // Actualizar daño de ladrillos según el control
+  brickDamageValue = parseInt(brickDamageInput.value);
+  
+  for(let i=bricks.length-1;i>=0;i--){ 
+    const b = bricks[i]; 
+    b.x += b.vx * dt; 
+    b.y += b.vy * dt; 
+    b.angle += dt * 6 * (parseInt(moveSpeedInput.value)/100);
+    
+    // Solo comprobar colisiones si no estamos en modo inmune
+    if (!immune) {
+      const dd = Math.hypot(b.x - cube.x, b.y - cube.y);
+      if(dd < (cube.size/2 + b.size/2 - 2)){ 
+        takeDamage(brickDamageValue); 
+        spawnParticles(cube.x,cube.y,'#ff5a5a'); 
+        bricks.splice(i,1); 
+      }
+    }
+    
+    if(b.x < -120 || b.x > W+120 || b.y < -120 || b.y > H+120) bricks.splice(i,1);
+  }
+
+  // update particles
+  for(let i=particles.length-1;i>=0;i--){ const p = particles[i]; p.x += p.vx*dt; p.y += p.vy*dt; p.life -= dt; if(p.life<=0) particles.splice(i,1); }
+
+  // hit flash
+  if(hitFlash>0) hitFlash = Math.max(0, hitFlash - dt);
+
+  const enPct = Math.min(1, energy / 100);
+  enFill.style.width = (enPct*100)+'%'; enText.textContent = energy;
+  const hpPct = Math.max(0, hp / maxHP);
+  hpFill.style.width = (hpPct*100)+'%'; hpText.textContent = Math.max(0, Math.round(hp)) + ' / ' + maxHP;
+}
+
+function takeDamage(d){ 
+  if (!immune) {
+    hp -= d; 
+    if(hp <= 0) hp = 0; 
+    playSound('hit'); 
+    hitFlash = 0.18; 
+  }
+}
+
+function render(){
+  ctx.clearRect(0,0,W,H);
+  // background
+  const g = ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,'#07101a'); g.addColorStop(1,'#08131b'); ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+
+  // particles
+  for(const p of particles){ ctx.globalAlpha = Math.max(0,p.life/0.6); ctx.beginPath(); ctx.fillStyle = p.color; ctx.arc(p.x,p.y,3,0,Math.PI*2); ctx.fill(); }
+  ctx.globalAlpha = 1;
+
+  // bricks
+  for(const b of bricks){ ctx.save(); ctx.translate(b.x,b.y); ctx.rotate(b.angle); ctx.fillStyle = '#b25a5a'; ctx.fillRect(-b.size/2, -b.size/2, b.size, b.size); ctx.restore(); }
+
+  // hit flash glow
+  if(hitFlash>0){ ctx.save(); ctx.globalAlpha = hitFlash/0.18 * 0.6; ctx.fillStyle = 'rgba(255,90,90,0.18)'; ctx.beginPath(); ctx.arc(cube.x, cube.y, cube.size/2 + 18 * (hitFlash/0.18), 0, Math.PI*2); ctx.fill(); ctx.restore(); }
+
+  // Efecto de inmunidad (brillo azul alrededor del cubo)
+  if (immune) {
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    ctx.fillStyle = 'rgba(100, 180, 255, 0.3)';
+    ctx.beginPath();
+    ctx.arc(cube.x, cube.y, cube.size/2 + 10, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // cube
+  ctx.save(); ctx.translate(cube.x, cube.y); ctx.fillStyle = '#ffffff'; ctx.shadowColor = '#ffe177'; ctx.shadowBlur = 20 * (1 - Math.min(1, hitFlash/0.18)); ctx.fillRect(-cube.size/2, -cube.size/2, cube.size, cube.size); ctx.restore();
+}
+
+function enterRestTurn(){ 
+  inRestTurn = true; 
+  immune = true; // Activar inmunidad durante el turno de descanso
+  showRestOverlay(); 
+}
+
+function endRestTurn(){ 
+  inRestTurn = false; 
+  immune = false; // Desactivar inmunidad al terminar el turno
+  chargeStart = performance.now(); 
+  chargeFill.style.width = '0%'; 
+  chargeText.textContent = '0%'; 
+  turnOverlay.innerHTML = ''; 
+}
+
+function showRestOverlay(){
+  turnOverlay.innerHTML = '';
+  const card = document.createElement('div'); card.className = 'overlayCard';
+  card.innerHTML = `
+    <h3>Turno descanso</h3>
+    <div class="small">Elige una acción antes de reanudar.</div>
+    <div style="margin-top:10px">
+      <button id="btnHeal">Curar +${baseHeal + healBonus} HP</button>
+      <button id="btnEnergy">+30 Energía</button>
+      <button id="btnSacrifice" style="background:var(--danger);">Sacrificar -5 HP (+${baseHeal + healBonus + 5} HP en próxima cura)</button>
+      <button id="btnMaxHp" style="background:var(--highlight); color:#333;">Maximizar +20 HP</button>
+    </div>
+    <div style="margin-top:8px" class="small">Vida actual: <strong id=curHp>${hp}</strong> / ${maxHP}</div>`;
+  turnOverlay.appendChild(card);
+
+  document.getElementById('btnHeal').addEventListener('click', ()=>{ 
+    const healAmount = baseHeal + healBonus; 
+    hp = Math.min(maxHP, hp + healAmount); 
+    playSound('heal'); 
+    endRestTurn(); 
+  });
+  
+  document.getElementById('btnEnergy').addEventListener('click', ()=>{ 
+    energy += 30; 
+    if(energy>999) energy=999; 
+    playSound('energy'); 
+    endRestTurn(); 
+  });
+  
+  document.getElementById('btnSacrifice').addEventListener('click', ()=>{ 
+    hp = Math.max(0, hp - 5); 
+    healBonus += 5; // Aumentar bonus de curación permanente
+    playSound('hit'); 
+    endRestTurn(); 
+  });
+  
+  document.getElementById('btnMaxHp').addEventListener('click', ()=>{ 
+    maxHP += 20;
+    playSound('heal'); 
+    endRestTurn(); 
+  });
+}
+
+function gameOver(){
+  turnOverlay.innerHTML = '';
+  const card = document.createElement('div'); card.className = 'overlayCard';
+  card.innerHTML = `<h3>Game Over</h3><div class="small">Has sido aplastado por los ladrillos.</div><div style="margin-top:10px"><button id="btnRestart">Reiniciar</button></div>`;
+  turnOverlay.appendChild(card);
+  document.getElementById('btnRestart').addEventListener('click', ()=>{ resetGame(); });
+}
+
+function resetGame(){ 
+  hp = maxHP = 80; 
+  energy = 0; 
+  bricks = []; 
+  particles = []; 
+  healBonus = 0; 
+  inRestTurn = false; 
+  immune = false;
+  chargeStart = performance.now(); 
+  lastSpawn = performance.now(); 
+  turnOverlay.innerHTML = ''; 
+  lastTime = performance.now(); 
+  
+  // Resetear controles a valores por defecto
+  spawnSpeedInput.value = 100;
+  spawnPctLabel.textContent = '100%';
+  moveSpeedInput.value = 100;
+  movePctLabel.textContent = '100%';
+  brickAmountInput.value = 1;
+  brickCountLabel.textContent = '1';
+  brickDamageInput.value = 5;
+  brickDmgLabel.textContent = '5';
+  brickSizeInput.value = 100;
+  brickSizePctLabel.textContent = '100%';
+  brickBehaviorSelect.value = 'target';
+  
+  requestAnimationFrame(loop); 
+}
+
+// Accessibility: mouse support for testing on desktop
+let mouseDown=false;
+canvas.addEventListener('mousedown',(e)=>{ mouseDown=true; ensureAudio(); const r=canvas.getBoundingClientRect(); setCubeTo(e.clientX-r.left, e.clientY-r.top); });
+window.addEventListener('mousemove',(e)=>{ if(!mouseDown) return; const r=canvas.getBoundingClientRect(); setCubeTo(e.clientX-r.left, e.clientY-r.top); });
+window.addEventListener('mouseup',()=>{ mouseDown=false; });
+
+// Start game loop
+requestAnimationFrame((t)=>{ lastTime = t; chargeStart = t; lastSpawn = t; requestAnimationFrame(loop); });
+
+</script>
+</body>
+</html>
