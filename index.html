@@ -447,7 +447,7 @@ function showRestOverlay(){
   
   document.getElementById('btnSacrifice').addEventListener('click', ()=>{ 
     hp = Math.max(0, hp - 5); 
-    healBonus += 5; // Aumentar bonus de curación permanente
+    healBonus += 10; // Aumentar bonus de curación permanente
     playSound('hit'); 
     endRestTurn(); 
   });
