@@ -422,8 +422,8 @@ function showRestOverlay(){
     <div style="margin-top:10px">
       <button id="btnHeal">Curar +${baseHeal + healBonus} HP</button>
       <button id="btnEnergy">+30 Energía</button>
-      <button id="btnSacrifice" style="background:var(--danger);">Sacrificar -5 HP (+${baseHeal + healBonus + 5} HP en próxima cura)</button>
-      <button id="btnMaxHp" style="background:var(--highlight); color:#333;">Maximizar +20 HP</button>
+      <button id="btnSacrifice" style="background:var(--danger);">Sacrificar -5 HP (+10 HP permanente)</button>
+      <button id="btnMaxHp" style="background:var(--highlight); color:#333;">Maximizar +20 HP (cura)</button>
     </div>
     <div style="margin-top:8px" class="small">Vida actual: <strong id=curHp>${hp}</strong> / ${maxHP}</div>`;
   turnOverlay.appendChild(card);
@@ -447,13 +447,14 @@ function showRestOverlay(){
   
   document.getElementById('btnSacrifice').addEventListener('click', ()=>{ 
     hp = Math.max(0, hp - 5); 
-    healBonus += 10; // Aumentar bonus de curación permanente
+    healBonus += 10; // Aumentar bonus de curación permanente en +10 (en lugar de +5)
     playSound('hit'); 
     endRestTurn(); 
   });
   
   document.getElementById('btnMaxHp').addEventListener('click', ()=>{ 
     maxHP += 20;
+    hp += 20; // Ahora también cura los 20 HP
     playSound('heal'); 
     endRestTurn(); 
   });
