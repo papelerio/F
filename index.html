@@ -18,6 +18,9 @@
     .controls{margin-top:6px;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);padding:10px;border-radius:10px;max-width:320px;display:none;text-align:left;animation:fadeIn .3s ease forwards}
     .controls label{display:block;font-size:12px;margin-bottom:6px}
     .controls input[type=range]{width:220px}
+    .controls .checkbox-group {display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px;}
+    .controls .checkbox-label {display: flex; align-items: center; font-size: 12px;}
+    .controls .checkbox-label input {margin-right: 5px;}
     #info{font-size:13px;margin-top:6px}
     #turnOverlay{position:fixed;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
     .overlayCard{pointer-events:auto;background:linear-gradient(180deg,#0f1724, #0d1620);padding:16px;border-radius:12px;box-shadow:0 6px 30px rgba(0,0,0,.6);width:90%;max-width:360px;text-align:center;animation:pop .4s ease}
@@ -102,25 +105,34 @@
       <button class="controlsToggle" id="btnToggle">Dificultad</button>
       <div class="controls" id="controlsBox">
         <label>Velocidad de spawn: <span id="spawnPct">100%</span></label>
-        <input id="spawnSpeed" type="range" min="100" max="800" value="100">
+        <input id="spawnSpeed" type="range" min="5" max="1000" value="100">
 
         <label>Velocidad de desplazamiento ladrillos: <span id="movePct">100%</span></label>
-        <input id="moveSpeed" type="range" min="100" max="800" value="100">
+        <input id="moveSpeed" type="range" min="5" max="1000" value="100">
         
         <label>Cantidad de ladrillos: <span id="brickCount">1</span></label>
-        <input id="brickAmount" type="range" min="1" max="10" value="1">
+        <input id="brickAmount" type="range" min="1" max="20" value="1">
         
         <label>Daño de ladrillos: <span id="brickDmg">5</span></label>
-        <input id="brickDamage" type="range" min="5" max="20" value="5">
+        <input id="brickDamage" type="range" min="1" max="20" value="5">
         
         <label>Tamaño de ladrillos: <span id="brickSizePct">100%</span></label>
-        <input id="brickSize" type="range" min="50" max="600" value="100">
+        <input id="brickSize" type="range" min="10" max="800" value="100">
         
         <label>Comportamiento ladrillos:</label>
         <select id="brickBehavior">
           <option value="target">Dirigirse al jugador</option>
           <option value="straight">Recto (dirección fija)</option>
+          <option value="diagonal">Diagonal (rebote)</option>
         </select>
+        
+        <label>Lugar de salida:</label>
+        <div class="checkbox-group">
+          <label class="checkbox-label"><input type="checkbox" id="spawnTop" checked> Arriba</label>
+          <label class="checkbox-label"><input type="checkbox" id="spawnRight" checked> Derecha</label>
+          <label class="checkbox-label"><input type="checkbox" id="spawnBottom" checked> Abajo</label>
+          <label class="checkbox-label"><input type="checkbox" id="spawnLeft" checked> Izquierda</label>
+        </div>
 
         <div style="margin-top:8px" class="small">Durante el "turno descanso" aparecen 3 opciones: curar, +30 energía, sacrificar -5 HP (aumenta siguiente curación a +20).</div>
       </div>
@@ -185,6 +197,12 @@ const brickSizeInput = document.getElementById('brickSize');
 const brickSizePctLabel = document.getElementById('brickSizePct');
 const brickBehaviorSelect = document.getElementById('brickBehavior');
 
+// Checkboxes para lugar de salida
+const spawnTop = document.getElementById('spawnTop');
+const spawnRight = document.getElementById('spawnRight');
+const spawnBottom = document.getElementById('spawnBottom');
+const spawnLeft = document.getElementById('spawnLeft');
+
 // Event listeners para los nuevos controles
 spawnSpeedInput.addEventListener('input', ()=>{ spawnPctLabel.textContent = spawnSpeedInput.value + '%'; });
 moveSpeedInput.addEventListener('input', ()=>{ movePctLabel.textContent = moveSpeedInput.value + '%'; });
@@ -239,11 +257,26 @@ canvas.addEventListener('touchend', (e)=>{ e.preventDefault(); isTouching=false;
 
 function setCubeTo(x,y){ const pad = cube.size/2 + 6; cube.x = Math.max(pad, Math.min(W - pad, x)); cube.y = Math.max(pad, Math.min(H - pad, y)); }
 
+// Función para obtener lados disponibles para spawn
+function getAvailableSides() {
+  const availableSides = [];
+  if (spawnTop.checked) availableSides.push(0);
+  if (spawnRight.checked) availableSides.push(1);
+  if (spawnBottom.checked) availableSides.push(2);
+  if (spawnLeft.checked) availableSides.push(3);
+  return availableSides;
+}
+
 // Spawning bricks
 function spawnBrick(){
   const amount = parseInt(brickAmountInput.value);
+  const availableSides = getAvailableSides();
+  
+  // Si no hay lados disponibles, no spawnear ladrillos
+  if (availableSides.length === 0) return;
+  
   for (let i = 0; i < amount; i++) {
-    const side = Math.floor(Math.random()*4);
+    const side = availableSides[Math.floor(Math.random() * availableSides.length)];
     let bx, by, vx, vy;
     if(side===0){ bx = Math.random()*W; by = -30; }
     if(side===1){ bx = W+30; by = Math.random()*H; }
@@ -258,12 +291,19 @@ function spawnBrick(){
       const angle = Math.atan2(cube.y - by, cube.x - bx);
       vx = Math.cos(angle) * speed; 
       vy = Math.sin(angle) * speed;
-    } else {
+    } else if(brickBehaviorSelect.value === 'straight') {
       // Movimiento recto (dirección fija)
       if(side===0){ vx = 0; vy = speed; }
       if(side===1){ vx = -speed; vy = 0; }
       if(side===2){ vx = 0; vy = -speed; }
       if(side===3){ vx = speed; vy = 0; }
+    } else if(brickBehaviorSelect.value === 'diagonal') {
+      // Diagonal con rebote
+      const angle = Math.PI/4 + Math.random() * Math.PI/2; // Ángulo diagonal
+      if(side===0){ vx = Math.cos(angle) * speed; vy = Math.sin(angle) * speed; }
+      if(side===1){ vx = -Math.cos(angle) * speed; vy = Math.sin(angle) * speed; }
+      if(side===2){ vx = Math.cos(angle) * speed; vy = -Math.sin(angle) * speed; }
+      if(side===3){ vx = Math.cos(angle) * speed; vy = Math.sin(angle) * speed; }
     }
     
     const sizePct = parseInt(brickSizeInput.value)/100;
@@ -274,7 +314,8 @@ function spawnBrick(){
       vx:vx, vy:vy, 
       size: size,
       side:side,
-      angle:Math.random()*Math.PI*2
+      angle:Math.random()*Math.PI*2,
+      bounces: 0 // Contador de rebotes para el comportamiento diagonal
     });
   }
 }
@@ -313,6 +354,16 @@ function update(dt, now){
     b.y += b.vy * dt; 
     b.angle += dt * 6 * (parseInt(moveSpeedInput.value)/100);
     
+    // Comportamiento de rebote para ladrillos diagonales
+    if(brickBehaviorSelect.value === 'diagonal' && b.bounces < 1) {
+      if(b.x < 0 || b.x > W || b.y < 0 || b.y > H) {
+        // Rebote en los bordes
+        if(b.x < 0 || b.x > W) b.vx = -b.vx;
+        if(b.y < 0 || b.y > H) b.vy = -b.vy;
+        b.bounces++;
+      }
+    }
+    
     // Solo comprobar colisiones si no estamos en modo inmune
     if (!immune) {
       const dd = Math.hypot(b.x - cube.x, b.y - cube.y);
@@ -323,6 +374,7 @@ function update(dt, now){
       }
     }
     
+    // Eliminar ladrillos que salen del área visible
     if(b.x < -120 || b.x > W+120 || b.y < -120 || b.y > H+120) bricks.splice(i,1);
   }
 
@@ -494,6 +546,12 @@ function resetGame(){
   brickSizeInput.value = 100;
   brickSizePctLabel.textContent = '100%';
   brickBehaviorSelect.value = 'target';
+  
+  // Resetear checkboxes de lugar de salida
+  spawnTop.checked = true;
+  spawnRight.checked = true;
+  spawnBottom.checked = true;
+  spawnLeft.checked = true;
   
   requestAnimationFrame(loop); 
 }
