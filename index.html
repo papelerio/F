@@ -75,6 +75,21 @@
       font-weight: 700;
       cursor: pointer;
     }
+
+    /* Nuevo estilo para el botón de disparo */
+    #shootBtn {
+      position: fixed;
+      bottom: 12px;
+      left: 12px;
+      background: yellow;
+      color: black;
+      padding: 10px 15px;
+      border-radius: 10px;
+      border: none;
+      font-weight: bold;
+      cursor: pointer;
+      z-index: 10;
+    }
   </style>
 </head>
 <body>
@@ -140,6 +155,8 @@
 
     <div id="turnOverlay"></div>
 
+    <button id="shootBtn">Disparar</button>
+
     <footer>Archivo ejecutable: abre este HTML en tu navegador móvil. Optimizado para touch.</footer>
   </div>
 
@@ -183,6 +200,15 @@ const baseBrickSpeed = 120; // px/sec
 // Partículas y efectos
 let particles = [];
 let hitFlash = 0;
+
+// Nuevo: efectos de rayo
+let rayFlash = 0;
+let rayDirX = 0;
+let rayDirY = 0;
+
+// Nuevo: última dirección de movimiento (unit vector)
+let lastDirX = 0;
+let lastDirY = 0;
 
 // Sliders UI
 const spawnSpeedInput = document.getElementById('spawnSpeed');
@@ -255,7 +281,18 @@ canvas.addEventListener('touchstart', (e)=>{
 canvas.addEventListener('touchmove', (e)=>{ e.preventDefault(); if(!isTouching) return; const t = e.touches[0]; const rect = canvas.getBoundingClientRect(); setCubeTo(t.clientX-rect.left, t.clientY-rect.top); });
 canvas.addEventListener('touchend', (e)=>{ e.preventDefault(); isTouching=false; });
 
-function setCubeTo(x,y){ const pad = cube.size/2 + 6; cube.x = Math.max(pad, Math.min(W - pad, x)); cube.y = Math.max(pad, Math.min(H - pad, y)); }
+function setCubeTo(x,y){ 
+  const dx = x - cube.x;
+  const dy = y - cube.y;
+  const len = Math.hypot(dx, dy);
+  if (len > 1) { // Umbral para actualizar dirección
+    lastDirX = dx / len;
+    lastDirY = dy / len;
+  }
+  const pad = cube.size/2 + 6; 
+  cube.x = Math.max(pad, Math.min(W - pad, x)); 
+  cube.y = Math.max(pad, Math.min(H - pad, y)); 
+}
 
 // Función para obtener lados disponibles para spawn
 function getAvailableSides() {
@@ -315,7 +352,9 @@ function spawnBrick(){
       size: size,
       side:side,
       angle:Math.random()*Math.PI*2,
-      bounces: 0 // Contador de rebotes para el comportamiento diagonal
+      bounces: 0, // Contador de rebotes para el comportamiento diagonal
+      traveled: 0,
+      minToRebound: W / 2
     });
   }
 }
@@ -354,8 +393,13 @@ function update(dt, now){
     b.y += b.vy * dt; 
     b.angle += dt * 6 * (parseInt(moveSpeedInput.value)/100);
     
+    // Actualizar traveled
+    if (brickBehaviorSelect.value === 'diagonal') {
+      b.traveled += Math.hypot(b.vx * dt, b.vy * dt);
+    }
+    
     // Comportamiento de rebote para ladrillos diagonales
-    if(brickBehaviorSelect.value === 'diagonal' && b.bounces < 1) {
+    if(brickBehaviorSelect.value === 'diagonal' && b.bounces < 1 && b.traveled > b.minToRebound) {
       if(b.x < 0 || b.x > W || b.y < 0 || b.y > H) {
         // Rebote en los bordes
         if(b.x < 0 || b.x > W) b.vx = -b.vx;
@@ -383,6 +427,9 @@ function update(dt, now){
 
   // hit flash
   if(hitFlash>0) hitFlash = Math.max(0, hitFlash - dt);
+
+  // Nuevo: ray flash
+  if(rayFlash > 0) rayFlash = Math.max(0, rayFlash - dt);
 
   const enPct = Math.min(1, energy / 100);
   enFill.style.width = (enPct*100)+'%'; enText.textContent = energy;
@@ -413,6 +460,19 @@ function render(){
 
   // hit flash glow
   if(hitFlash>0){ ctx.save(); ctx.globalAlpha = hitFlash/0.18 * 0.6; ctx.fillStyle = 'rgba(255,90,90,0.18)'; ctx.beginPath(); ctx.arc(cube.x, cube.y, cube.size/2 + 18 * (hitFlash/0.18), 0, Math.PI*2); ctx.fill(); ctx.restore(); }
+
+  // Nuevo: render ray flash
+  if(rayFlash > 0){ 
+    ctx.save(); 
+    ctx.globalAlpha = rayFlash / 0.2; 
+    ctx.beginPath(); 
+    ctx.moveTo(cube.x, cube.y); 
+    ctx.lineTo(cube.x + rayDirX * Math.hypot(W, H) * 2, cube.y + rayDirY * Math.hypot(W, H) * 2); 
+    ctx.strokeStyle = '#ffe177'; 
+    ctx.lineWidth = 6; 
+    ctx.stroke(); 
+    ctx.restore(); 
+  }
 
   // Efecto de inmunidad (brillo azul alrededor del cubo)
   if (immune) {
@@ -533,6 +593,9 @@ function resetGame(){
   lastSpawn = performance.now(); 
   turnOverlay.innerHTML = ''; 
   lastTime = performance.now(); 
+  lastDirX = 0;
+  lastDirY = 0;
+  rayFlash = 0;
   
   // Resetear controles a valores por defecto
   spawnSpeedInput.value = 100;
@@ -556,11 +619,66 @@ function resetGame(){
   requestAnimationFrame(loop); 
 }
 
+// Nuevo: función para disparar el rayo
+function shootRay() {
+  if (lastDirX === 0 && lastDirY === 0) return; // No disparar si no hay dirección
+
+  playSound('energy');
+
+  // Establecer efecto visual
+  rayDirX = lastDirX;
+  rayDirY = lastDirY;
+  rayFlash = 0.2;
+
+  // Ray casting para hits (piercing: destruye todos en el camino)
+  const step = 5;
+  const maxDist = Math.hypot(W, H) * 2;
+  let hitSomething = false;
+
+  for (let d = 0; d < maxDist; d += step) {
+    const px = cube.x + lastDirX * d;
+    const py = cube.y + lastDirY * d;
+
+    if (px < -50 || px > W + 50 || py < -50 || py > H + 50) break;
+
+    for (let i = bricks.length - 1; i >= 0; i--) {
+      const b = bricks[i];
+      if (Math.hypot(px - b.x, py - b.y) < b.size / 2 + 3) { // 3 = grosor del rayo
+        spawnParticles(b.x, b.y, '#ffe177');
+        bricks.splice(i, 1);
+        hp = Math.min(maxHP, hp + 2);
+        playSound('heal');
+        hitSomething = true;
+      }
+    }
+  }
+
+  if (hitSomething) playSound('hit');
+}
+
 // Accessibility: mouse support for testing on desktop
 let mouseDown=false;
-canvas.addEventListener('mousedown',(e)=>{ mouseDown=true; ensureAudio(); const r=canvas.getBoundingClientRect(); setCubeTo(e.clientX-r.left, e.clientY-r.top); });
+canvas.addEventListener('mousedown',(e)=>{ 
+  const r=canvas.getBoundingClientRect(); 
+  const x = e.clientX - r.left;
+  const y = e.clientY - r.top;
+  if (e.button === 0) { 
+    mouseDown=true; 
+    setCubeTo(x, y); 
+  } 
+});
 window.addEventListener('mousemove',(e)=>{ if(!mouseDown) return; const r=canvas.getBoundingClientRect(); setCubeTo(e.clientX-r.left, e.clientY-r.top); });
 window.addEventListener('mouseup',()=>{ mouseDown=false; });
+
+// Nuevo: tecla X para disparar
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'x' || e.key === 'X') {
+    shootRay();
+  }
+});
+
+// Botón para móviles
+document.getElementById('shootBtn').addEventListener('click', shootRay);
 
 // Start game loop
 requestAnimationFrame((t)=>{ lastTime = t; chargeStart = t; lastSpawn = t; requestAnimationFrame(loop); });
